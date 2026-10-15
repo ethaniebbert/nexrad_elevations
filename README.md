@@ -19,8 +19,25 @@ The first full run downloads about 1,370 GLO-90 tiles (~6 GB) from the public
 AWS bucket `s3://copernicus-dem-90m`. They are cached in `dem_cache/`, so later
 runs are fast.
 
-Open `output/nexrad_beam_height_agl.kmz` in Google Earth (Pro, or web via
-*Projects → Open → Import KML file*).
+Open `output/nexrad_beam_height_agl.kmz` in **Google Earth Pro**.
+
+### Google Earth Web
+
+Earth Web can't read images packed in a KMZ or stored on your computer, so use
+the KML published on this repo's GitHub Pages site. Its overlay images are
+hosted there:
+
+1. Download [nexrad_beam_height_agl.kml](https://ethaniebbert.github.io/nexrad_elevations/nexrad_beam_height_agl.kml).
+2. In Earth Web: *Projects → New project → Import KML file from computer*.
+
+To rebuild that KML after changing settings, point its image links at your
+host and publish `output/nexrad_beam_height_agl.kml` with `output/files/` to
+that URL (here, the `gh-pages` branch):
+
+```bash
+python nexrad_beam_height.py --format kml \
+    --image-base-url https://ethaniebbert.github.io/nexrad_elevations/
+```
 
 ## What's in the KMZ
 

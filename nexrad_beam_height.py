@@ -574,17 +574,21 @@ def site_placemark(res: RadarResult, cfg: Config, units: str) -> str:
             f"<Point><coordinates>{s.lon:.6f},{s.lat:.6f},0</coordinates></Point></Placemark>")
 
 
-def write_kmz(path: Path, results: list[RadarResult], composites: dict[str, Composite],
-              cfg: Config, units: str, individual: bool):
+def write_google_earth(path: Path, results: list[RadarResult], composites: dict[str, Composite],
+                       cfg: Config, units: str, individual: bool, image_base_url: str | None = None):
+    """Write a .kmz (images zipped inside) or a .kml with images in files/ beside it.
+    image_base_url makes the KML's image links absolute, e.g. to a web host;
+    Google Earth Web can only load KML overlays whose images are online."""
     levels = LEVELS[units]
     palette = level_colors(len(levels))
     files: dict[str, bytes] = {"files/legend.png": legend_png(units)}
+    prefix = image_base_url.rstrip("/") + "/" if image_base_url else ""
 
     def overlays(name, index, grid, pal, prefix, visible=True, opacity=0.8):
         items = []
         for href, png, bounds in chunk_overlays(index, grid, pal, prefix):
             files[f"files/{href}"] = png
-            items.append(kml_ground_overlay(name, f"files/{href}", bounds, visible, opacity))
+            items.append(kml_ground_overlay(name, f"{prefix}files/{href}", bounds, visible, opacity))
         return items
 
     center_folders, bottom_folders, blocked_folders = [], [], []
@@ -623,9 +627,9 @@ def write_kmz(path: Path, results: list[RadarResult], composites: dict[str, Comp
 <kml xmlns="http://www.opengis.net/kml/2.2"><Document>
 <name>NEXRAD lowest-beam height AGL</name><open>1</open>
 <description>{escape(about)}</description>
-<Style id="radar"><IconStyle><scale>0.8</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle><LabelStyle><scale>0.7</scale></LabelStyle></Style>
+<Style id="radar"><IconStyle><scale>0.8</scale><Icon><href>https://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle><LabelStyle><scale>0.7</scale></LabelStyle></Style>
 <Style id="ring"><LineStyle><color>ccffffff</color><width>1.5</width></LineStyle></Style>
-<ScreenOverlay><name>Legend</name><Icon><href>files/legend.png</href></Icon>
+<ScreenOverlay><name>Legend</name><Icon><href>{prefix}files/legend.png</href></Icon>
 <overlayXY x="0" y="0" xunits="fraction" yunits="fraction"/><screenXY x="10" y="30" xunits="pixels" yunits="pixels"/>
 <size x="0" y="0" xunits="pixels" yunits="pixels"/></ScreenOverlay>
 {kml_folder("Radar sites", placemarks)}
@@ -635,10 +639,16 @@ def write_kmz(path: Path, results: list[RadarResult], composites: dict[str, Comp
 {kml_folder("Individual radars", per_radar, visible=False) if per_radar else ""}
 </Document></kml>
 """
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("doc.kml", kml)
+    if path.suffix == ".kmz":
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("doc.kml", kml)
+            for name, data in files.items():
+                zf.writestr(name, data, compress_type=zipfile.ZIP_STORED)
+    else:
+        path.write_text(kml, encoding="utf-8")
         for name, data in files.items():
-            zf.writestr(name, data, compress_type=zipfile.ZIP_STORED)
+            (path.parent / name).parent.mkdir(parents=True, exist_ok=True)
+            (path.parent / name).write_bytes(data)
 
 
 # --------------------------------------------------------------------------- #
@@ -701,7 +711,12 @@ def parse_args(argv=None):
                    help="ignore terrain closer than this (antenna near field; default 1.5 km)")
     p.add_argument("--res-deg", type=float, default=0.01, help="output grid spacing (default 0.01°)")
     p.add_argument("--units", choices=["ft", "m"], default="ft", help="KMZ color-scale units")
-    p.add_argument("--no-individual", action="store_true", help="skip per-radar overlays in the KMZ")
+    p.add_argument("--no-individual", action="store_true", help="skip per-radar overlays")
+    p.add_argument("--format", choices=["kmz", "kml", "both"], default="kmz",
+                   help="kmz = one self-contained file (Google Earth Pro); kml = .kml plus files/ "
+                        "folder of images (default kmz)")
+    p.add_argument("--image-base-url", help="URL where the files/ folder will be hosted; makes the "
+                   ".kml's image links absolute so it loads in Google Earth Web")
     p.add_argument("--cache-dir", type=Path, default=REPO_DIR / "dem_cache")
     p.add_argument("--out-dir", type=Path, default=REPO_DIR / "output")
     p.add_argument("--workers", type=int, default=max(1, min(4, (os.cpu_count() or 2) - 1)))
@@ -767,9 +782,12 @@ def main(argv=None):
     for region, comp in composites.items():
         write_geotiff(args.out_dir / f"{region.lower().replace(' ', '_')}_beam_height_agl.tif", comp)
     write_summary(args.out_dir / "radar_summary.csv", results)
-    kmz = args.out_dir / "nexrad_beam_height_agl.kmz"
-    write_kmz(kmz, results, composites, cfg, args.units, not args.no_individual)
-    print(f"Wrote {kmz} ({kmz.stat().st_size / 1e6:.1f} MB) and GeoTIFFs/CSV in {args.out_dir}")
+    for ext in (["kmz", "kml"] if args.format == "both" else [args.format]):
+        out = args.out_dir / f"nexrad_beam_height_agl.{ext}"
+        write_google_earth(out, results, composites, cfg, args.units, not args.no_individual,
+                           args.image_base_url if ext == "kml" else None)
+        print(f"Wrote {out} ({out.stat().st_size / 1e6:.1f} MB)")
+    print(f"GeoTIFFs and radar_summary.csv in {args.out_dir}")
 
 
 if __name__ == "__main__":
