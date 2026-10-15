@@ -1,0 +1,12 @@
+name: nexrad_elevations
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy
+  - scipy
+  - rasterio
+  - pyproj
+  - matplotlib
+  - requests
+  - tqdm
